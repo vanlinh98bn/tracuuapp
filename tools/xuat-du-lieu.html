@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><title>Xuất dữ liệu quy chế</title></head>
+<body>
+<!-- Trang nội bộ: tools/ma-hoa-du-lieu.ps1 mở ngầm để đọc dữ liệu gốc dưới dạng JSON. Không đưa lên web. -->
+<pre id="o">WAIT</pre>
+<script src="../data/raw.js"></script>
+<script src="../js/catalog.js"></script>
+<script>
+try {
+  const globals = { RAW_DOCS: window.RAW_DOCS, RAW_FILES: window.RAW_FILES, RAW_UPDATED: window.RAW_UPDATED, RAW_SHEETS: window.RAW_SHEETS || {}, COMPANY, GROUPS, CATALOG, TOPICS, QUICK_TOPICS, QUICK };
+  // Mã hóa base64 (UTF-8) để tránh lỗi ký tự khi đọc từ DOM
+  const json = JSON.stringify({ globals });
+  const bytes = new TextEncoder().encode(json);
+  let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  document.getElementById('o').textContent = '@@BEGIN@@' + btoa(s) + '@@END@@';
+} catch (e) { document.getElementById('o').textContent = 'ERROR ' + (e && e.message); }
+</script>
+</body></html>

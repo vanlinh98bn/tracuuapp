@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><title>Xuất dữ liệu quy chế ra SQL</title></head>
+<body>
+<!-- Trang nội bộ: tools/tao-seed-sql.ps1 mở ngầm để sinh backend/db/seed.sql. Không đưa lên web. -->
+<pre id="o">WAIT</pre>
+<script src="../data/raw.js"></script>
+<script src="../js/catalog.js"></script>
+<script>
+try {
+  const clean = (s) => String(s).replace(/\u0000/g, '');
+  const q = (v) => v == null || v === '' ? 'NULL' : `'${clean(v).replace(/'/g, "''")}'`;
+  const num = (v) => v == null || v === '' || isNaN(v) ? 'NULL' : String(Number(v));
+  const bool = (v) => (v ? 'true' : 'false');
+  const arr = (a) => a && a.length ? `ARRAY[${a.map(q).join(', ')}]::text[]` : `'{}'::text[]`;
+  const json = (o) => o == null ? 'NULL' : `${q(JSON.stringify(o))}::jsonb`;
+  const date = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '') ? `'${s}'` : 'NULL';
+  const out = [];
+  const insert = (table, cols, rows, conflict) => {
+    if (!rows.length) return;
+    for (let i = 0; i < rows.length; i += 200) {
+      out.push(`INSERT INTO ${table} (${cols.join(', ')}) VALUES\n  ${rows.slice(i, i + 200).map((r) => `(${r.join(', ')})`).join(',\n  ')}${conflict ? '\n' + conflict : ''};`);
+    }
+  };
+  const excluded = (cols, keep) => 'ON CONFLICT (' + keep + ') DO UPDATE SET ' + cols.filter((c) => c !== keep).map((c) => `${c} = EXCLUDED.${c}`).join(', ');
+
+  const RAW = window.RAW_DOCS || {}, SHEETS = window.RAW_SHEETS || {}, FILES = window.RAW_FILES || [];
+  const QUIZ_ = typeof QUIZ !== 'undefined' ? QUIZ : [];
+  const ids = new Set(CATALOG.map((d) => d.id));
+  const docOrNull = (id) => (ids.has(id) ? q(id) : 'NULL');
+  const plain = (blocks) => (blocks || []).map((b) => (b.t === 'table' ? (b.rows || []).map((r) => r.join(' | ')).join('\n') : b.text || '')).join('\n');
+
+  out.push(`-- Tự sinh bởi tools/tao-seed-sql.ps1 từ data/raw.js (${window.RAW_UPDATED || '?'}) và js/catalog.js. Không sửa tay.`);
+  out.push('-- CHỨA TOÀN BỘ NỘI DUNG QUY CHẾ: không đưa lên web, không gửi ra ngoài.');
+  out.push('-- Chạy lại được nhiều lần: cập nhật văn bản, giữ nguyên người dùng, góp ý và nhật ký.');
+  out.push('BEGIN;\nSET search_path = qc, public;\nSET CONSTRAINTS ALL DEFERRED;');
+
+  // Nhóm văn bản
+  const gCols = ['code', 'name', 'description', 'color', 'sort'];
+  insert('doc_groups', gCols, Object.entries(GROUPS).map(([k, g], i) => [q(k), q(g.name), q(g.desc), q(g.color), i]), excluded(gCols, 'code'));
+
+  // Văn bản
+  const dCols = ['id', 'group_code', 'parent_id', 'no', 'title', 'summary', 'tags', 'notes', 'issued_label', 'expired_reason',
+    'source_path', 'form_dir', 'render_opts', 'blocks', 'body_text', 'source_modified', 'sort'];
+  insert('documents', dCols, CATALOG.map((d, i) => {
+    const raw = RAW[d.file] || {};
+    const opts = {}; ['appendixFrom', 'appendixBack', 'dropFrom', 'dropBack'].forEach((k) => { if (d[k] != null) opts[k] = d[k]; });
+    return [q(d.id), q(d.group), d.parent ? docOrNull(d.parent) : 'NULL', q(d.no), q(d.title), q(d.summary), arr(d.tags), arr(d.notes),
+      q(d.date), q(d.expired), q(d.file), q(d.formDir), json(opts), json(raw.blocks || null), q(plain(raw.blocks)), date(raw.modified), i];
+  }), excluded(dCols, 'id'));
+  out.push(`DELETE FROM documents WHERE id NOT IN (${[...ids].map(q).join(', ')});`);
+
+  // File gốc (giữ storage_key đã tải lên)
+  const byFile = {}; CATALOG.forEach((d) => { if (d.file) byFile[d.file] = d.id; });
+  const fCols = ['path', 'name', 'ext', 'size_kb', 'is_private', 'document_id', 'source_modified'];
+  insert('source_files', fCols, FILES.map((f) => [q(f.path), q(f.path.split('/').pop()), q(f.ext), num(f.kb), bool(f.private),
+    byFile[f.path] ? q(byFile[f.path]) : 'NULL', date((RAW[f.path] || SHEETS[f.path] || {}).modified)]), excluded(fCols, 'path'));
+  if (FILES.length) out.push(`DELETE FROM source_files WHERE path NOT IN (${FILES.map((f) => q(f.path)).join(', ')});`);
+
+  // Sheet Excel
+  out.push('DELETE FROM sheets;');
+  const known = new Set(FILES.filter((f) => !f.private).map((f) => f.path)); // file riêng tư: chỉ lưu tên, không lưu nội dung
+  const sheetRows = [];
+  Object.entries(SHEETS).forEach(([path, s]) => { if (known.has(path)) (s.sheets || []).forEach((sh, i) => sheetRows.push([q(path), i, q(sh.name), json(sh.rows || []), bool(sh.truncated)])); });
+  insert('sheets', ['file_path', 'idx', 'name', 'rows', 'truncated'], sheetRows);
+
+  // Chủ đề, tra cứu nhanh, trắc nghiệm: nạp lại toàn bộ
+  out.push('DELETE FROM topic_refs; DELETE FROM topic_documents; DELETE FROM topics;');
+  out.push('DELETE FROM quick_questions; DELETE FROM quick_topics; DELETE FROM quiz_questions;');
+  const tEntries = Object.entries(typeof TOPICS !== 'undefined' ? TOPICS : {});
+  insert('topics', ['code', 'name', 'description', 'color', 'icon', 'search_q', 'note', 'sort'],
+    tEntries.map(([k, t], i) => [q(k), q(t.name), q(t.desc), q(t.color), q(t.icon), q(t.q), q(t.note), i]));
+  insert('topic_documents', ['topic_code', 'document_id', 'sort'],
+    tEntries.flatMap(([k, t]) => (t.docs || []).filter((id) => ids.has(id)).map((id, i) => [q(k), q(id), i])));
+  insert('topic_refs', ['topic_code', 'document_id', 'find', 'label', 'sort'],
+    tEntries.flatMap(([k, t]) => (t.refs || []).filter((r) => ids.has(r.doc)).map((r, i) => [q(k), q(r.doc), q(r.find), q(r.label), i])));
+  insert('quick_topics', ['code', 'name', 'sort'], Object.entries(QUICK_TOPICS).map(([k, v], i) => [q(k), q(v), i]));
+  insert('quick_questions', ['topic_code', 'question', 'answer', 'document_id', 'find', 'sort'],
+    QUICK.map((x, i) => [q(x.topic), q(x.q), q(x.a), docOrNull(x.doc), q(x.find), i]));
+  insert('quiz_questions', ['document_id', 'find', 'question', 'answers', 'explanation', 'sort'],
+    QUIZ_.map((x, i) => [docOrNull(x.doc), q(x.find), q(x.q), arr(x.a), q(x.e), i]));
+
+  out.push('COMMIT;');
+  out.push(`-- ${CATALOG.length} văn bản · ${FILES.length} file gốc · ${sheetRows.length} sheet · ${tEntries.length} chủ đề · ${QUICK.length} câu tra cứu nhanh · ${QUIZ_.length} câu trắc nghiệm`);
+
+  const bytes = new TextEncoder().encode(out.join('\n\n') + '\n');
+  let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  document.getElementById('o').textContent = '@@BEGIN@@' + btoa(s) + '@@END@@';
+} catch (e) { document.getElementById('o').textContent = 'ERROR ' + (e && e.message); }
+</script>
+</body></html>

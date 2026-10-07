@@ -1,0 +1,26 @@
+# =============================================================
+#  KHÔNG đưa lên GitHub (repo công khai):
+#  mật khẩu, khóa bí mật, nội dung quy chế (kể cả bản đã mã hóa)
+# =============================================================
+
+# Mật khẩu tài khoản & danh sách file chứa thông tin cá nhân
+tools/tai-khoan.csv
+tools/khong-dua-len-web.txt
+
+# Nội dung quy chế chưa mã hóa
+data/raw.js
+js/catalog.js
+backend/db/seed.sql
+
+# Nội dung đã mã hóa (repo công khai: tránh bị dò mật khẩu ngoài trình duyệt)
+data/secure.js
+data/files/
+
+# Khóa bí mật máy chủ
+.env
+backend/.env
+
+# Tự sinh / tải lại được
+node_modules/
+dist/
+*.log

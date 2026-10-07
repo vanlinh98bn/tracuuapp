@@ -1,0 +1,21 @@
+{
+  "name": "tra-cuu-quy-che-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend web Tra cứu Quy chế – Cát Tường Homes",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --env-file=.env --watch src/server.js",
+    "local": "node --env-file=.env src/server.js"
+  },
+  "dependencies": {
+    "@azure/msal-node": "^3.0.0",
+    "@azure/storage-blob": "^12.0.0",
+    "compression": "^1.8.0",
+    "express": "^5.0.0",
+    "pg": "^8.13.0"
+  }
+}
